@@ -1,20 +1,38 @@
-import { cleanVideo } from "./cleaner.js";
+import { inspectAndClean } from "./cleaner.js";
 
 const input = document.querySelector("#file-input");
 const dropZone = document.querySelector("#drop-zone");
 const result = document.querySelector("#result");
 const fileName = document.querySelector("#file-name");
-const status = document.querySelector("#status");
+const fileSummary = document.querySelector("#file-summary");
+const hdrSummary = document.querySelector("#hdr-summary");
+const outputMetadataSummary = document.querySelector("#output-metadata-summary");
 const saveButton = document.querySelector("#save-button");
+const saveHint = document.querySelector("#save-hint");
+const newFileButton = document.querySelector("#new-file-button");
 const message = document.querySelector("#message");
+const inspectorEmpty = document.querySelector("#inspector-empty");
+const inspectorContent = document.querySelector("#inspector-content");
+const detectedSource = document.querySelector("#detected-source");
+const detectedBadge = document.querySelector("#detected-badge");
+const detectedDescription = document.querySelector("#detected-description");
+const culpritCard = document.querySelector("#culprit-card");
+const culpritTitle = document.querySelector("#culprit-title");
+const culpritKey = document.querySelector("#culprit-key");
+const culpritSummary = document.querySelector("#culprit-summary");
+const culpritDetails = document.querySelector("#culprit-details");
+const removedCount = document.querySelector("#removed-count");
+const removedList = document.querySelector("#removed-list");
+const inputCount = document.querySelector("#input-count");
+const inputList = document.querySelector("#input-list");
 
 let output = null;
 
 function setBusy(busy) {
   dropZone.disabled = busy;
-  dropZone.querySelector(".drop-title").textContent = busy ? "Cleaning video…" : "Drop a video here";
+  dropZone.querySelector(".drop-title").textContent = busy ? "Inspecting and cleaning…" : "Drop a video here";
   dropZone.querySelector(".drop-subtitle").textContent = busy
-    ? "The file stays on this device"
+    ? "The file never leaves this device"
     : "or choose a MOV or MP4 file";
 }
 
@@ -23,25 +41,166 @@ function showMessage(text, isError = false) {
   message.classList.toggle("is-error", isError);
 }
 
+function formatBytes(bytes) {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value >= 10 || unit === "B" ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return null;
+  const rounded = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(rounded / 60);
+  const remaining = rounded % 60;
+  return `${minutes}:${String(remaining).padStart(2, "0")}`;
+}
+
+function videoDescription(media) {
+  const video = media.video;
+  if (!video) return "Media structure preserved";
+  const parts = [];
+  if (video.codec) parts.push(video.codec.toUpperCase());
+  if (video.bitDepth) parts.push(`${video.bitDepth}-bit`);
+  if (video.dimensions) parts.push(`${video.dimensions.width} × ${video.dimensions.height}`);
+  if (video.dolbyVision) parts.push(`Dolby Vision Profile ${video.dolbyVision.profile}`);
+  return parts.join(" · ");
+}
+
+function hdrDescription(media) {
+  const dv = media.video?.dolbyVision;
+  if (!dv) return "Codec, color, and playback boxes are unchanged.";
+  const compatibility = dv.compatibilityId === 4 ? ".4" : "";
+  return `Dolby Vision Profile ${dv.profile}${compatibility} configuration retained.`;
+}
+
+function makeMetadataItem(entry, includeReason = true) {
+  const item = document.createElement("div");
+  item.className = "metadata-item";
+
+  const head = document.createElement("div");
+  head.className = "metadata-item-head";
+
+  const key = document.createElement("span");
+  key.className = "metadata-key";
+  key.textContent = entry.key;
+
+  const type = document.createElement("span");
+  type.className = "metadata-type";
+  type.textContent = entry.type;
+
+  head.append(key, type);
+  item.append(head);
+
+  if (entry.displayValue) {
+    const value = document.createElement("p");
+    value.className = "metadata-value";
+    value.textContent = entry.displayValue.length > 180 ? `${entry.displayValue.slice(0, 177)}…` : entry.displayValue;
+    item.append(value);
+  }
+
+  if (includeReason) {
+    const reason = document.createElement("p");
+    reason.className = "metadata-reason";
+    reason.textContent = entry.reason;
+    item.append(reason);
+  }
+
+  return item;
+}
+
+function renderList(container, entries, includeReason = true) {
+  container.replaceChildren(...entries.map((entry) => makeMetadataItem(entry, includeReason)));
+}
+
+function renderCulprit(culprit) {
+  if (!culprit) {
+    culpritCard.hidden = true;
+    return;
+  }
+
+  culpritCard.hidden = false;
+  culpritTitle.textContent = "Embedded editor export fingerprint";
+  culpritKey.textContent = culprit.key;
+  culpritSummary.textContent = culprit.reason;
+  culpritDetails.replaceChildren();
+
+  for (const [label, value] of Object.entries(culprit.details || {})) {
+    if (!value) continue;
+    const dt = document.createElement("dt");
+    const dd = document.createElement("dd");
+    dt.textContent = label;
+    dd.textContent = value;
+    culpritDetails.append(dt, dd);
+  }
+}
+
+function renderReport(report) {
+  const duration = formatDuration(report.file.duration);
+  fileName.textContent = report.file.outputName;
+  fileSummary.textContent = [report.file.container, formatBytes(report.file.size), duration, videoDescription(report.media)]
+    .filter(Boolean)
+    .join(" · ");
+  hdrSummary.textContent = hdrDescription(report.media);
+  outputMetadataSummary.textContent = `${report.metadata.outputUserFieldCount} detected user/editor fields remain; required technical metadata is retained.`;
+
+  const detection = report.detection;
+  if (detection.editor) {
+    detectedSource.textContent = detection.editor;
+    detectedBadge.hidden = false;
+    detectedDescription.textContent = `${detection.identifiers.length} editor-specific identifier${detection.identifiers.length === 1 ? "" : "s"} found. The strongest one is highlighted below.`;
+  } else {
+    detectedSource.textContent = "No known editor fingerprint";
+    detectedBadge.hidden = true;
+    detectedDescription.textContent = "No known CapCut, Vicut, ByteDance, or Dreamina marker was found. Other non-essential metadata was still removed.";
+  }
+
+  renderCulprit(detection.culprit);
+  removedCount.textContent = `${report.metadata.removed.length} field${report.metadata.removed.length === 1 ? "" : "s"}`;
+  inputCount.textContent = `(${report.metadata.inputCount})`;
+  const identifiers = report.metadata.removed.filter((entry) =>
+    ["Editor fingerprint", "ByteDance flag", "Dreamina marker", "Vendor flag", "Editor identifier"].includes(entry.type)
+  );
+  const otherCount = report.metadata.removed.length - identifiers.length;
+  const visibleRemoved = [...identifiers];
+  if (otherCount > 0) {
+    visibleRemoved.push({
+      key: `${otherCount} additional field${otherCount === 1 ? "" : "s"}`,
+      type: "Privacy cleanup",
+      displayValue: "Encoder data, redundant export values, and container timestamps",
+      reason: "Removed because these fields are not required for playback. Expand “All input metadata” to inspect each one."
+    });
+  }
+  renderList(removedList, visibleRemoved, true);
+  renderList(inputList, report.metadata.input, false);
+
+  inspectorEmpty.hidden = true;
+  inspectorContent.hidden = false;
+  result.hidden = false;
+  dropZone.hidden = true;
+
+  const onAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  saveButton.textContent = onAppleMobile ? "Save or share clean video" : "Download clean video";
+  saveHint.textContent = onAppleMobile
+    ? "Uses the iPhone share sheet. Choose Save to Files or another destination."
+    : `Downloads as ${report.file.outputName.split(".").pop().toUpperCase()}.`;
+}
+
 async function handleFile(file) {
+  dropZone.hidden = false;
   result.hidden = true;
   output = null;
   showMessage("");
   setBusy(true);
 
   try {
-    const cleaned = await cleanVideo(file);
-
-    if (!cleaned.changed) {
-      showMessage("No matching CapCut or ByteDance identifiers were found.");
-      return;
-    }
-
-    output = cleaned;
-    fileName.textContent = cleaned.name;
-    status.textContent = "Media streams unchanged";
-    result.hidden = false;
-    showMessage("Ready to save.");
+    output = await inspectAndClean(file);
+    renderReport(output.report);
+    showMessage(output.changed ? "Clean copy is ready." : "No removable user metadata was found; the original media was left unchanged.");
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "The video could not be cleaned.", true);
   } finally {
@@ -55,22 +214,20 @@ function downloadOutput() {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = output.name;
+  anchor.style.display = "none";
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 async function saveOutput() {
   if (!output) return;
-
-  const sharedFile = new File([output.blob], output.name, {
-    type: output.blob.type || "video/quicktime"
-  });
+  const sharedFile = new File([output.blob], output.name, { type: output.blob.type || "video/quicktime" });
 
   try {
     if (navigator.canShare?.({ files: [sharedFile] })) {
-      await navigator.share({ files: [sharedFile] });
+      await navigator.share({ files: [sharedFile], title: output.name });
       return;
     }
   } catch (error) {
@@ -80,7 +237,12 @@ async function saveOutput() {
   downloadOutput();
 }
 
+function chooseAnother() {
+  input.click();
+}
+
 dropZone.addEventListener("click", () => input.click());
+newFileButton.addEventListener("click", chooseAnother);
 input.addEventListener("change", () => {
   const [file] = input.files;
   if (file) handleFile(file);
