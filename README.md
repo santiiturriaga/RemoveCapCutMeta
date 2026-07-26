@@ -1,4 +1,4 @@
-# Clean Export
+# Remove Capcut Metadata
 
 A static, client-side MOV/MP4 metadata cleaner designed for CapCut and other ByteDance exports.
 
@@ -33,16 +33,6 @@ python -m http.server 8080
 Then open `http://localhost:8080`.
 
 Opening `index.html` directly may work in some browsers, but a local server is recommended because the JavaScript uses ES modules.
-
-## Publish with GitHub Pages
-
-1. Create a new GitHub repository.
-2. Upload the files in this folder to the repository root.
-3. Open **Settings → Pages**.
-4. Under **Build and deployment**, choose **Deploy from a branch**.
-5. Select `main` and `/ (root)`, then save.
-
-No build command, server, API key, or dependency installation is required.
 
 ## Browser notes
 
