@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f7f5">
+  <title>Clean Export</title>
+  <meta name="description" content="Remove CapCut and ByteDance export identifiers from MOV and MP4 files without re-encoding.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Clean Export</h1>
+      <p>Remove editor identifiers without re-encoding your video.</p>
+    </header>
+
+    <section class="panel" aria-label="Video cleaner">
+      <input id="file-input" type="file" accept="video/quicktime,video/mp4,.mov,.mp4" hidden>
+
+      <button id="drop-zone" class="drop-zone" type="button">
+        <span class="drop-title">Drop a video here</span>
+        <span class="drop-subtitle">or choose a MOV or MP4 file</span>
+      </button>
+
+      <div id="result" class="result" hidden>
+        <div class="result-copy">
+          <strong id="file-name"></strong>
+          <span id="status">Ready</span>
+        </div>
+        <button id="save-button" class="save-button" type="button">Save video</button>
+      </div>
+
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+    </section>
+
+    <footer>
+      <span>Processed locally</span>
+      <span>No upload</span>
+      <span>No re-encoding</span>
+    </footer>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
