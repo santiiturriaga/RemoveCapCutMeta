@@ -1,3 +1,4 @@
+import { removeEditorMetadataFromBox } from "./rewrite-metadata.js";
 const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
 const MARKERS = [
@@ -351,105 +352,6 @@ function analyzeMoov(bytes) {
 }
 
 
-function isCapCutEntry(key, value, editorDetected) {
-  const name = String(key || "").toLowerCase();
-  return containsMarker(name) || containsMarker(value)
-    || (editorDetected && name === "hw");
-}
-
-// Keep the original numeric indices and data headers inside ilst. Replacing
-// indexed entries with free boxes can confuse some QuickTime metadata readers.
-function neutralizeMetadataItem(bytes, item) {
-  const children = parseBoxes(bytes, item.position + item.headerSize, item.position + item.size);
-  const dataBoxes = children.filter((child) => child.type === "data");
-  const ranges = dataBoxes.length ? dataBoxes.map((child) => ({
-    start: Math.min(child.position + child.headerSize + 8, child.position + child.size),
-    end: child.position + child.size
-  })) : [{ start: item.position + item.headerSize, end: item.position + item.size }];
-  let changed = false;
-  for (const range of ranges) {
-    for (let index = range.start; index < range.end; index += 1) {
-      if (bytes[index] !== 0) changed = true;
-    }
-    bytes.fill(0, range.start, range.end);
-  }
-  return changed;
-}
-
-function scrubMeta(bytes, box, removed, path, editorDetected) {
-  const local = bytes.subarray(box.position, box.position + box.size);
-  const first = box.position + metaChildrenStart(local);
-  const children = parseBoxes(bytes, first, box.position + box.size);
-  const keysBox = children.find((part) => part.type === "keys");
-  const keys = [];
-  if (keysBox) {
-    const start = keysBox.position + keysBox.headerSize;
-    const count = start + 8 <= keysBox.position + keysBox.size ? readU32(bytes, start + 4) : 0;
-    let pos = start + 8;
-    if (count < 100000) for (let i = 0; i < count; i += 1) {
-      if (pos + 8 > keysBox.position + keysBox.size) break;
-      const size = readU32(bytes, pos);
-      if (size < 8 || pos + size > keysBox.position + keysBox.size) break;
-      keys.push({ name: textDecoder.decode(bytes.subarray(pos + 8, pos + size)), start: pos + 8, end: pos + size });
-      pos += size;
-    }
-  }
-  for (const list of children.filter((part) => part.type === "ilst")) {
-    for (const item of parseBoxes(bytes, list.position + list.headerSize, list.position + list.size)) {
-      const index = readU32(bytes, item.position + 4);
-      const named = index >= 1 && index <= keys.length ? keys[index - 1] : null;
-      const key = named ? named.name : item.type;
-      const payload = bytes.slice(item.position + item.headerSize, item.position + item.size);
-      const value = extractDataValue(payload);
-      if (!isCapCutEntry(key, value, editorDetected)) continue;
-      let changed = neutralizeMetadataItem(bytes, item);
-      if (named && containsMarker(named.name)) {
-        bytes.fill(0x5f, named.start, named.end);
-        changed = true;
-      }
-      if (changed) removed.push({ key, path: path + "/ilst" });
-    }
-  }
-  for (const child of children) {
-    if (["keys", "ilst", "hdlr", "free"].includes(child.type) || child.type === "uuid") continue;
-    const length = Math.min(child.size, 1024 * 1024);
-    const value = printableText(bytes.subarray(child.position + child.headerSize, child.position + length));
-    if (isCapCutEntry(child.type, value, editorDetected)) {
-      bytes.fill(0, child.position + child.headerSize, child.position + child.size);
-      removed.push({ key: child.type, path });
-    }
-  }
-}
-
-function scrubUdta(bytes, box, removed, path, editorDetected) {
-  for (const child of parseBoxes(bytes, box.position + box.headerSize, box.position + box.size)) {
-    if (child.type === "meta") {
-      scrubMeta(bytes, child, removed, path + "/meta", editorDetected);
-    } else if (child.type !== "uuid" && child.type !== "free") {
-      const length = Math.min(child.size, 1024 * 1024);
-      const value = printableText(bytes.subarray(child.position + child.headerSize, child.position + length));
-      if (isCapCutEntry(child.type, value, editorDetected)) {
-        bytes.fill(0, child.position + child.headerSize, child.position + child.size);
-        removed.push({ key: child.type, path });
-      }
-    }
-  }
-}
-
-function scrubMoov(bytes, editorDetected) {
-  const removed = [];
-  function scan(parent, path) {
-    for (const child of parseBoxes(bytes, parent.position + parent.headerSize, parent.position + parent.size)) {
-      if (child.type === "meta") scrubMeta(bytes, child, removed, path + "/meta", editorDetected);
-      else if (child.type === "udta") scrubUdta(bytes, child, removed, path + "/udta", editorDetected);
-      else if (child.type === "trak" || child.type === "mdia") scan(child, path + "/" + child.type);
-      // Never touch uuid, stsd, colr, hvcC, dvvC, dvcC, mdcv, clli, or any sample table.
-    }
-  }
-  scan({ position: 0, size: bytes.length, headerSize: 8 }, "moov");
-  return { changed: removed.length > 0, removed };
-}
-
 function sampleDescriptions(bytes) {
   const result = [];
   for (const track of parseBoxes(bytes, 8, bytes.length)) {
@@ -666,13 +568,12 @@ export async function inspectAndClean(file) {
       beforeMoov = analyzeMoov(original);
       allMetadata.push(...beforeMoov.metadata);
 
-      const cleaned = original.slice();
       const vendorDetected = beforeMoov.metadata.some((e) => containsMarker(e.key) || containsMarker(e.value));
-      const scrubbed = scrubMoov(cleaned, vendorDetected);
+      const scrubbed = removeEditorMetadataFromBox(original, "moov", { vendorDetected });
       scrubbed.removed.forEach((entry) => removedKeys.add(entry.key));
-      technicalBytesUnchanged = technicalBytesUnchanged && sameSampleDescriptions(original, cleaned);
-      afterMoov = analyzeMoov(cleaned);
-      if (scrubbed.changed) patches.push({ position: box.position, bytes: cleaned });
+      technicalBytesUnchanged = technicalBytesUnchanged && sameSampleDescriptions(original, scrubbed.bytes);
+      afterMoov = analyzeMoov(scrubbed.bytes);
+      if (scrubbed.changed) patches.push({ position: box.position, bytes: scrubbed.bytes });
       continue;
     }
 
@@ -682,15 +583,11 @@ export async function inspectAndClean(file) {
       const parsed = box.type === "meta" ? parseMetaEntries(original, "root/meta")
         : parseUdtaEntries(original, "root/udta");
       allMetadata.push(...parsed);
-      const copy = original.slice();
       const foundVendor = parsed.some((e) => containsMarker(e.key) || containsMarker(e.value));
-      const removed = [];
-      const root = { position: 0, size: copy.length, headerSize: box.headerSize };
-      if (box.type === "meta") scrubMeta(copy, root, removed, "root/meta", foundVendor);
-      else scrubUdta(copy, root, removed, "root/udta", foundVendor);
-      removed.forEach((entry) => removedKeys.add(entry.key));
-      if (removed.length) {
-        patches.push({ position: box.position, bytes: copy });
+      const scrubbed = removeEditorMetadataFromBox(original, box.type, { vendorDetected: foundVendor });
+      scrubbed.removed.forEach((entry) => removedKeys.add(entry.key));
+      if (scrubbed.changed) {
+        patches.push({ position: box.position, bytes: scrubbed.bytes });
         topLevelChanged = true;
       }
     }

@@ -1,5 +1,6 @@
-import { inspectAndClean } from "./cleaner.js?v=hdr-preserve-3";
-import { shareWithFallback } from "./share.js?v=hdr-preserve-3";
+import { inspectAndClean } from "./cleaner.js?v=hdr-preserve-4";
+import { shareWithFallback } from "./share.js?v=hdr-preserve-4";
+import { compareMediaFiles } from "./verify-media.js?v=hdr-preserve-4";
 
 const input = document.querySelector("#file-input");
 const dropZone = document.querySelector("#drop-zone");
@@ -10,6 +11,10 @@ const hdrSummary = document.querySelector("#hdr-summary");
 const hdrStatus = document.querySelector("#hdr-status");
 const hdrCheckRow = document.querySelector("#hdr-check-row");
 const byteSummary = document.querySelector("#byte-summary");
+const verifySavedInput = document.querySelector("#verify-saved-input");
+const verifySavedButton = document.querySelector("#verify-saved-button");
+const verifySavedResult = document.querySelector("#verify-saved-result");
+const exactDownloadButton = document.querySelector("#exact-download-button");
 const outputMetadataSummary = document.querySelector("#output-metadata-summary");
 const saveButton = document.querySelector("#save-button");
 const saveHint = document.querySelector("#save-hint");
@@ -31,6 +36,7 @@ const inputCount = document.querySelector("#input-count");
 const inputList = document.querySelector("#input-list");
 
 let output = null;
+let selectedSource = null;
 
 function setBusy(busy) {
   dropZone.disabled = busy;
@@ -171,9 +177,9 @@ function renderReport(report) {
     : hdr.state === "sdr" ? "Selected source is SDR" : "Source HDR status undetermined";
   hdrCheckRow.classList.toggle("verification-warning", hdr.state !== "hdr");
   hdrCheckRow.querySelector(".check").textContent = hdr.state === "hdr" ? "✓" : "?";
-  byteSummary.textContent = "Input " + report.file.size.toLocaleString() +
-    " bytes · Clean " + report.file.outputSize.toLocaleString() +
-    " bytes · Same exact length";
+  byteSummary.textContent = "Received by this browser: " + report.file.size.toLocaleString() +
+    " bytes · Clean result: " + report.file.outputSize.toLocaleString() +
+    " bytes. Full encoded video/audio and codec configuration verified byte-for-byte.";
   outputMetadataSummary.textContent = "Only identified CapCut/ByteDance fields are removed; unrelated metadata is retained.";
 
   const detection = report.detection;
@@ -222,11 +228,20 @@ async function handleFile(file) {
   dropZone.hidden = false;
   result.hidden = true;
   output = null;
+  selectedSource = null;
+  verifySavedResult.hidden = true;
+  verifySavedResult.textContent = "";
   showMessage("");
   setBusy(true);
 
   try {
     output = await inspectAndClean(file);
+    const verified = await compareMediaFiles(file, output.blob);
+    if (verified.encodedMediaBytesIdentical !== true || !verified.sampleDescriptionsIdentical) {
+      output = null;
+      throw new Error("The cleaner could not verify byte-identical encoded video and codec metadata. No output will be offered.");
+    }
+    selectedSource = file;
     renderReport(output.report);
     const hdr = hdrSourceStatus(output.report.media);
     if (hdr.state === "sdr") {
@@ -262,6 +277,36 @@ async function saveOutput() {
 function chooseAnother() {
   input.click();
 }
+async function verifySavedFile(file) {
+  if (!selectedSource || !file) return;
+  verifySavedResult.hidden = false;
+  verifySavedResult.textContent = "Comparing saved media bytes...";
+  try {
+    const comparison = await compareMediaFiles(selectedSource, file);
+    const inspected = await inspectAndClean(file); // Inspection uses its input report; does not modify the selected file.
+    const beforeHDR = hdrSourceStatus(output.report.media);
+    const afterHDR = hdrSourceStatus(inspected.report.media);
+    let verdict;
+    if (comparison.encodedMediaBytesIdentical === true && comparison.sampleDescriptionsIdentical) {
+      verdict = "Encoded video/audio AND track codec/HDR configuration match exactly. No HDR media data was lost between this webpage's input and the saved file.";
+    } else if (comparison.encodedMediaBytesIdentical === true) {
+      verdict = "The encoded video/audio match, but codec/HDR configuration differs. The saving or importing path changed technical metadata.";
+    } else {
+      verdict = "The encoded video/audio differ. A share, import, or conversion step modified the media; metadata cleaning alone cannot explain this result.";
+    }
+    verifySavedResult.textContent =
+      verdict + "\n" +
+      "Browser input: " + comparison.originalBytes.toLocaleString() + " bytes · " +
+      "Saved: " + comparison.candidateBytes.toLocaleString() + " bytes.\n" +
+      "Original HDR signal: " + beforeHDR.state + " · Saved HDR signal: " + afterHDR.state +
+      "\nEncoded payload identical: " + comparison.encodedMediaBytesIdentical +
+      " · Codec configurations identical: " + comparison.sampleDescriptionsIdentical +
+      "\n" + comparison.reason +
+      "\nIf you chose Photo Library instead of Files during this check, iOS may have converted the selected video before it reached this page.";
+  } catch (error) {
+    verifySavedResult.textContent = "Could not verify saved file: " + (error.message || String(error));
+  }
+}
 
 dropZone.addEventListener("click", () => input.click());
 newFileButton.addEventListener("click", chooseAnother);
@@ -290,3 +335,10 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 saveButton.addEventListener("click", saveOutput);
+exactDownloadButton.addEventListener("click", () => { if (output) downloadOutput(); });
+verifySavedButton.addEventListener("click", () => verifySavedInput.click());
+verifySavedInput.addEventListener("change", () => {
+  const [file] = verifySavedInput.files;
+  if (file) void verifySavedFile(file);
+  verifySavedInput.value = "";
+});

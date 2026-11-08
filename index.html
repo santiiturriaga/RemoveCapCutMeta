@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f4f4f1">
   <title>Clean Export</title>
   <meta name="description" content="Inspect and remove CapCut and ByteDance editor metadata without re-encoding.">
-  <link rel="stylesheet" href="styles.css?v=hdr-preserve-3">
+  <link rel="stylesheet" href="styles.css?v=hdr-preserve-4">
 </head>
 <body>
   <main class="page-shell">
@@ -56,6 +56,12 @@
           <p id="byte-summary" class="byte-summary"></p>
           <button id="save-button" class="save-button" type="button">Save clean video</button>
           <p class="save-hint" id="save-hint">The output keeps the original file type.</p>
+          <div class="verification-actions">
+            <button id="exact-download-button" class="text-button" type="button">Download exact file (bypass share sheet)</button>
+            <button id="verify-saved-button" class="text-button" type="button">Verify saved video's HDR and media bytes</button>
+            <input id="verify-saved-input" type="file" accept=".mov,.mp4,video/mp4,video/quicktime" hidden>
+          </div>
+          <p id="verify-saved-result" class="verify-saved-result" role="status" hidden></p>
         </div>
 
         <p id="message" class="message" role="status" aria-live="polite"></p>
@@ -114,6 +120,6 @@
     </footer>
   </main>
 
-  <script type="module" src="app.js?v=hdr-preserve-3"></script>
+  <script type="module" src="app.js?v=hdr-preserve-4"></script>
 </body>
 </html>

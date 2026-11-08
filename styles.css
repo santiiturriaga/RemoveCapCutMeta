@@ -1,3 +1,5 @@
+/* Honor hidden even on sections with explicit grid or flex styling. */
+[hidden] { display: none !important; }
 :root {
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -425,3 +427,7 @@ footer {
 .byte-summary { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; text-align: center; }
 .verification-warning .check { border-color: #b69b60; color: #806324; }
 .message.is-warning { color: #805d24; }
+
+.verification-actions { display: grid; justify-items: center; gap: 9px; padding-top: 5px; }
+.verify-saved-result { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5;
+  color: #4b4b46; border: 1px solid var(--line); padding: 10px; margin: 0; background: var(--soft); }
