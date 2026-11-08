@@ -357,6 +357,25 @@ function isCapCutEntry(key, value, editorDetected) {
     || (editorDetected && name === "hw");
 }
 
+// Keep the original numeric indices and data headers inside ilst. Replacing
+// indexed entries with free boxes can confuse some QuickTime metadata readers.
+function neutralizeMetadataItem(bytes, item) {
+  const children = parseBoxes(bytes, item.position + item.headerSize, item.position + item.size);
+  const dataBoxes = children.filter((child) => child.type === "data");
+  const ranges = dataBoxes.length ? dataBoxes.map((child) => ({
+    start: Math.min(child.position + child.headerSize + 8, child.position + child.size),
+    end: child.position + child.size
+  })) : [{ start: item.position + item.headerSize, end: item.position + item.size }];
+  let changed = false;
+  for (const range of ranges) {
+    for (let index = range.start; index < range.end; index += 1) {
+      if (bytes[index] !== 0) changed = true;
+    }
+    bytes.fill(0, range.start, range.end);
+  }
+  return changed;
+}
+
 function scrubMeta(bytes, box, removed, path, editorDetected) {
   const local = bytes.subarray(box.position, box.position + box.size);
   const first = box.position + metaChildrenStart(local);
@@ -383,16 +402,20 @@ function scrubMeta(bytes, box, removed, path, editorDetected) {
       const payload = bytes.slice(item.position + item.headerSize, item.position + item.size);
       const value = extractDataValue(payload);
       if (!isCapCutEntry(key, value, editorDetected)) continue;
-      if (!replaceWithFree(bytes, item)) continue;
-      if (named && containsMarker(named.name)) bytes.fill(0x5f, named.start, named.end);
-      removed.push({ key, path: path + "/ilst" });
+      let changed = neutralizeMetadataItem(bytes, item);
+      if (named && containsMarker(named.name)) {
+        bytes.fill(0x5f, named.start, named.end);
+        changed = true;
+      }
+      if (changed) removed.push({ key, path: path + "/ilst" });
     }
   }
   for (const child of children) {
     if (["keys", "ilst", "hdlr", "free"].includes(child.type) || child.type === "uuid") continue;
     const length = Math.min(child.size, 1024 * 1024);
     const value = printableText(bytes.subarray(child.position + child.headerSize, child.position + length));
-    if (isCapCutEntry(child.type, value, editorDetected) && replaceWithFree(bytes, child)) {
+    if (isCapCutEntry(child.type, value, editorDetected)) {
+      bytes.fill(0, child.position + child.headerSize, child.position + child.size);
       removed.push({ key: child.type, path });
     }
   }
@@ -405,7 +428,8 @@ function scrubUdta(bytes, box, removed, path, editorDetected) {
     } else if (child.type !== "uuid" && child.type !== "free") {
       const length = Math.min(child.size, 1024 * 1024);
       const value = printableText(bytes.subarray(child.position + child.headerSize, child.position + length));
-      if (isCapCutEntry(child.type, value, editorDetected) && replaceWithFree(bytes, child)) {
+      if (isCapCutEntry(child.type, value, editorDetected)) {
+        bytes.fill(0, child.position + child.headerSize, child.position + child.size);
         removed.push({ key: child.type, path });
       }
     }
@@ -696,6 +720,7 @@ export async function inspectAndClean(file) {
         inputName: file.name,
         outputName: outputName(file.name),
         size: file.size,
+        outputSize: blob.size,
         container: formatContainer(extension, ftyp),
         duration: beforeMoov.duration
       },

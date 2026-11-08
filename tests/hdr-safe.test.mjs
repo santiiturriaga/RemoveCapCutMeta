@@ -112,3 +112,38 @@ test('Unknown HDR without colr/dvvC is not wrongly labeled HDR', async () => {
   assert.equal(result.report.media.hdrRetained, null, 'no HDR indicator is not proof of SDR');
   assert.equal(result.report.checks.mediaUnchanged, true);
 });
+
+
+test('indexed ilst child boxes and all technical headers remain structurally unchanged', async () => {
+  const original = await bytes(source({ transfer: 18, editor: true, dv: true }));
+  const result = await inspectAndClean(new File([original], 'preserve.mp4', { type: 'video/mp4' }));
+  const cleaned = await bytes(result.blob);
+  const findAscii = (array, needle) => {
+    const pattern = new TextEncoder().encode(needle);
+    for (let n = 0; n <= array.length - pattern.length; n += 1) {
+      if (pattern.every((value, k) => array[n + k] === value)) return n;
+    }
+    return -1;
+  };
+  const ilst = findAscii(original, 'ilst');
+  assert.ok(ilst > 4);
+  const u32 = (b, off) => new DataView(b.buffer, b.byteOffset + off, 4).getUint32(0, false);
+  const start = ilst - 4;
+  const end = start + u32(original, start);
+  assert.equal(u32(cleaned, start), u32(original, start));
+  let offset = ilst + 4;
+  let entries = 0;
+  while (offset + 8 <= end) {
+    const length = u32(original, offset);
+    assert.ok(length >= 8 && offset + length <= end);
+    assert.equal(u32(cleaned, offset), length);
+    assert.equal(u32(cleaned, offset + 4), u32(original, offset + 4),
+      'metadata index is still numeric; no free box inserted in ilst');
+    offset += length;
+    entries += 1;
+  }
+  assert.equal(entries, 3);
+  assert.equal(offset, end);
+  assert.deepEqual(cleaned.subarray(0, 32), original.subarray(0, 32));
+  assert.equal(result.report.file.outputSize, original.length);
+});

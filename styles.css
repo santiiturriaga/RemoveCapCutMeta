@@ -419,3 +419,9 @@ footer {
   .drop-zone { min-height: 230px; }
   .result-heading { flex-direction: column; gap: 8px; }
 }
+
+.picker-note { margin: 8px 2px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+#drop-zone[hidden] + .picker-note { display: none; }
+.byte-summary { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; text-align: center; }
+.verification-warning .check { border-color: #b69b60; color: #806324; }
+.message.is-warning { color: #805d24; }

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f4f4f1">
   <title>Clean Export</title>
   <meta name="description" content="Inspect and remove CapCut and ByteDance editor metadata without re-encoding.">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=hdr-preserve-3">
 </head>
 <body>
   <main class="page-shell">
@@ -26,6 +26,7 @@
           <span class="drop-title">Drop a video here</span>
           <span class="drop-subtitle">or choose a MOV or MP4 file</span>
         </button>
+        <p class="picker-note">On iPhone, use <strong>Choose Files</strong> for HDR exports. Selecting from Photo Library can provide an SDR-converted copy before the site receives it.</p>
 
         <div id="result" class="result" hidden>
           <div class="result-heading">
@@ -42,9 +43,9 @@
               <span class="check" aria-hidden="true">✓</span>
               <p><strong>Media unchanged</strong><span>Video and audio data are copied byte-for-byte.</span></p>
             </div>
-            <div>
-              <span class="check" aria-hidden="true">✓</span>
-              <p><strong>Color/HDR signaling preserved</strong><span id="hdr-summary">Technical video metadata is preserved.</span></p>
+            <div id="hdr-check-row">
+              <span class="check" aria-hidden="true">?</span>
+              <p><strong id="hdr-status">Source HDR status</strong><span id="hdr-summary">Inspecting video signaling.</span></p>
             </div>
             <div>
               <span class="check" aria-hidden="true">✓</span>
@@ -52,6 +53,7 @@
             </div>
           </div>
 
+          <p id="byte-summary" class="byte-summary"></p>
           <button id="save-button" class="save-button" type="button">Save clean video</button>
           <p class="save-hint" id="save-hint">The output keeps the original file type.</p>
         </div>
@@ -112,6 +114,6 @@
     </footer>
   </main>
 
-  <script type="module" src="app.js?v=hdr-preserve-2"></script>
+  <script type="module" src="app.js?v=hdr-preserve-3"></script>
 </body>
 </html>

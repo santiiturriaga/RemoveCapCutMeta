@@ -1,4 +1,5 @@
-import { inspectAndClean } from "./cleaner.js?v=hdr-preserve-2";
+import { inspectAndClean } from "./cleaner.js?v=hdr-preserve-3";
+import { shareWithFallback } from "./share.js?v=hdr-preserve-3";
 
 const input = document.querySelector("#file-input");
 const dropZone = document.querySelector("#drop-zone");
@@ -6,6 +7,9 @@ const result = document.querySelector("#result");
 const fileName = document.querySelector("#file-name");
 const fileSummary = document.querySelector("#file-summary");
 const hdrSummary = document.querySelector("#hdr-summary");
+const hdrStatus = document.querySelector("#hdr-status");
+const hdrCheckRow = document.querySelector("#hdr-check-row");
+const byteSummary = document.querySelector("#byte-summary");
 const outputMetadataSummary = document.querySelector("#output-metadata-summary");
 const saveButton = document.querySelector("#save-button");
 const saveHint = document.querySelector("#save-hint");
@@ -33,12 +37,15 @@ function setBusy(busy) {
   dropZone.querySelector(".drop-title").textContent = busy ? "Inspecting and cleaning…" : "Drop a video here";
   dropZone.querySelector(".drop-subtitle").textContent = busy
     ? "The file never leaves this device"
-    : "or choose a MOV or MP4 file";
+    : /iPhone|iPad|iPod/i.test(navigator.userAgent)
+      ? "Choose from Files (not Photo Library) to avoid automatic SDR conversion"
+      : "or choose a MOV or MP4 file";
 }
 
-function showMessage(text, isError = false) {
+function showMessage(text, isError = false, isWarning = false) {
   message.textContent = text;
   message.classList.toggle("is-error", isError);
+  message.classList.toggle("is-warning", isWarning);
 }
 
 function formatBytes(bytes) {
@@ -73,15 +80,22 @@ function videoDescription(media) {
   return parts.join(" · ");
 }
 
-function hdrDescription(media) {
+function hdrSourceStatus(media) {
   const video = media.video;
-  if (!video) return "No video track found.";
-  if (video.dolbyVision) return "Dolby Vision configuration preserved byte-for-byte.";
-  if (video.color?.transfer === 16) return "HDR PQ (ST 2084) transfer and codec configuration preserved byte-for-byte.";
-  if (video.color?.transfer === 18) return "HDR HLG transfer and codec configuration preserved byte-for-byte.";
-  if (video.color) return "Source color transfer is " + video.color.transfer +
-    "; all codec/color configuration is preserved. Not labeled HDR.";
-  return "HDR status unknown from container alone; codec and color configuration bytes are unchanged.";
+  if (!video) return { state: "unknown", text: "No video track found." };
+  if (video.dolbyVision) return { state: "hdr", text: "Dolby Vision configuration preserved." };
+  const transfer = video.color?.transfer;
+  if (transfer === 16) return { state: "hdr", text: "HDR PQ (ST 2084) color signaling preserved." };
+  if (transfer === 18) return { state: "hdr", text: "HLG color signaling preserved." };
+  if ([1, 6, 13, 14, 15].includes(transfer)) return {
+    state: "sdr",
+    text: "The selected source is signaled as SDR (transfer " + transfer +
+      "). If it plays in HDR in Photos, the picker may have converted it. Use Files."
+  };
+  return {
+    state: "unknown",
+    text: "No recognized HDR indicator in the container. HDR may be in the HEVC bitstream; those bytes are preserved."
+  };
 }
 
 function makeMetadataItem(entry, includeReason = true) {
@@ -151,7 +165,15 @@ function renderReport(report) {
   fileSummary.textContent = [report.file.container, formatBytes(report.file.size), duration, videoDescription(report.media)]
     .filter(Boolean)
     .join(" · ");
-  hdrSummary.textContent = hdrDescription(report.media);
+  const hdr = hdrSourceStatus(report.media);
+  hdrSummary.textContent = hdr.text;
+  hdrStatus.textContent = hdr.state === "hdr" ? "Source HDR signaling preserved"
+    : hdr.state === "sdr" ? "Selected source is SDR" : "Source HDR status undetermined";
+  hdrCheckRow.classList.toggle("verification-warning", hdr.state !== "hdr");
+  hdrCheckRow.querySelector(".check").textContent = hdr.state === "hdr" ? "✓" : "?";
+  byteSummary.textContent = "Input " + report.file.size.toLocaleString() +
+    " bytes · Clean " + report.file.outputSize.toLocaleString() +
+    " bytes · Same exact length";
   outputMetadataSummary.textContent = "Only identified CapCut/ByteDance fields are removed; unrelated metadata is retained.";
 
   const detection = report.detection;
@@ -190,9 +212,9 @@ function renderReport(report) {
   dropZone.hidden = true;
 
   const onAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  saveButton.textContent = "Download clean video";
+  saveButton.textContent = onAppleMobile ? "Save or share clean video" : "Download clean video";
   saveHint.textContent = onAppleMobile
-    ? "Downloads the MP4/MOV bytes directly to Files; sharing through other apps may change HDR."
+    ? "Opens the iPhone share sheet, as before. Choose Save Video or Save to Files."
     : `Downloads as ${report.file.outputName.split(".").pop().toUpperCase()}.`;
 }
 
@@ -206,7 +228,12 @@ async function handleFile(file) {
   try {
     output = await inspectAndClean(file);
     renderReport(output.report);
-    showMessage(output.changed ? "Clean copy is ready." : "No identifiable CapCut metadata was found; the original media was left unchanged.");
+    const hdr = hdrSourceStatus(output.report.media);
+    if (hdr.state === "sdr") {
+      showMessage("The selected input is SDR. The cleaner cannot recover HDR lost before import. On iPhone, choose the original from Files, not Photo Library.", false, true);
+    } else {
+      showMessage(output.changed ? "Clean copy is ready." : "No identifiable CapCut metadata was found; the original media was left unchanged.");
+    }
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "The video could not be cleaned.", true);
   } finally {
@@ -227,11 +254,9 @@ function downloadOutput() {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function saveOutput() {
+async function saveOutput() {
   if (!output) return;
-  // Do not round-trip the output through another app's native share pipeline:
-  // destinations such as photo editors may create a new SDR/transcoded asset.
-  downloadOutput();
+  await shareWithFallback(output, navigator, downloadOutput);
 }
 
 function chooseAnother() {
