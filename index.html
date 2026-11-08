@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f4f1">
   <title>Clean Export</title>
-  <meta name="description" content="Inspect and remove CapCut, ByteDance, and unnecessary MOV metadata without re-encoding.">
+  <meta name="description" content="Inspect and remove CapCut and ByteDance editor metadata without re-encoding.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
     <header class="site-header">
       <div>
         <h1>Clean Export</h1>
-        <p>Remove editor fingerprints and unnecessary metadata without changing the video.</p>
+        <p>Remove identifiable CapCut export metadata without changing video, audio, or HDR.</p>
       </div>
       <span class="local-note">Runs on your device</span>
     </header>
@@ -44,11 +44,11 @@
             </div>
             <div>
               <span class="check" aria-hidden="true">✓</span>
-              <p><strong>HDR signaling retained</strong><span id="hdr-summary">Technical video metadata is preserved.</span></p>
+              <p><strong>Color/HDR signaling preserved</strong><span id="hdr-summary">Technical video metadata is preserved.</span></p>
             </div>
             <div>
               <span class="check" aria-hidden="true">✓</span>
-              <p><strong>Export metadata removed</strong><span id="output-metadata-summary">No user or editor fields remain.</span></p>
+              <p><strong>Identified editor metadata removed</strong><span id="output-metadata-summary">Unrelated metadata remains untouched.</span></p>
             </div>
           </div>
 
@@ -98,7 +98,7 @@
 
           <section class="output-state">
             <span class="eyebrow">Output state</span>
-            <strong>No detected user or editor metadata</strong>
+            <strong>Only known editor metadata is removed</strong>
             <p>Required container, codec, color, HDR, sample timing, and playback structures remain intact.</p>
           </section>
         </div>
@@ -112,6 +112,6 @@
     </footer>
   </main>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=hdr-preserve-2"></script>
 </body>
 </html>

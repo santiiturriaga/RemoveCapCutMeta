@@ -1,4 +1,4 @@
-import { inspectAndClean } from "./cleaner.js";
+import { inspectAndClean } from "./cleaner.js?v=hdr-preserve-2";
 
 const input = document.querySelector("#file-input");
 const dropZone = document.querySelector("#drop-zone");
@@ -67,15 +67,21 @@ function videoDescription(media) {
   if (video.codec) parts.push(video.codec.toUpperCase());
   if (video.bitDepth) parts.push(`${video.bitDepth}-bit`);
   if (video.dimensions) parts.push(`${video.dimensions.width} × ${video.dimensions.height}`);
+  if (video.color?.transfer === 16) parts.push("PQ HDR");
+  else if (video.color?.transfer === 18) parts.push("HLG HDR");
   if (video.dolbyVision) parts.push(`Dolby Vision Profile ${video.dolbyVision.profile}`);
   return parts.join(" · ");
 }
 
 function hdrDescription(media) {
-  const dv = media.video?.dolbyVision;
-  if (!dv) return "Codec, color, and playback boxes are unchanged.";
-  const compatibility = dv.compatibilityId === 4 ? ".4" : "";
-  return `Dolby Vision Profile ${dv.profile}${compatibility} configuration retained.`;
+  const video = media.video;
+  if (!video) return "No video track found.";
+  if (video.dolbyVision) return "Dolby Vision configuration preserved byte-for-byte.";
+  if (video.color?.transfer === 16) return "HDR PQ (ST 2084) transfer and codec configuration preserved byte-for-byte.";
+  if (video.color?.transfer === 18) return "HDR HLG transfer and codec configuration preserved byte-for-byte.";
+  if (video.color) return "Source color transfer is " + video.color.transfer +
+    "; all codec/color configuration is preserved. Not labeled HDR.";
+  return "HDR status unknown from container alone; codec and color configuration bytes are unchanged.";
 }
 
 function makeMetadataItem(entry, includeReason = true) {
@@ -146,7 +152,7 @@ function renderReport(report) {
     .filter(Boolean)
     .join(" · ");
   hdrSummary.textContent = hdrDescription(report.media);
-  outputMetadataSummary.textContent = `${report.metadata.outputUserFieldCount} detected user/editor fields remain; required technical metadata is retained.`;
+  outputMetadataSummary.textContent = "Only identified CapCut/ByteDance fields are removed; unrelated metadata is retained.";
 
   const detection = report.detection;
   if (detection.editor) {
@@ -156,7 +162,7 @@ function renderReport(report) {
   } else {
     detectedSource.textContent = "No known editor fingerprint";
     detectedBadge.hidden = true;
-    detectedDescription.textContent = "No known CapCut, Vicut, ByteDance, or Dreamina marker was found. Other non-essential metadata was still removed.";
+    detectedDescription.textContent = "No known CapCut, Vicut, ByteDance, or Dreamina marker was found. Unrelated metadata is preserved.";
   }
 
   renderCulprit(detection.culprit);
@@ -170,9 +176,9 @@ function renderReport(report) {
   if (otherCount > 0) {
     visibleRemoved.push({
       key: `${otherCount} additional field${otherCount === 1 ? "" : "s"}`,
-      type: "Privacy cleanup",
-      displayValue: "Encoder data, redundant export values, and container timestamps",
-      reason: "Removed because these fields are not required for playback. Expand “All input metadata” to inspect each one."
+      type: "Recognized editor metadata",
+      displayValue: "Additional identifiable editor fields",
+      reason: "Removed only when they match known CapCut/ByteDance identifiers."
     });
   }
   renderList(removedList, visibleRemoved, true);
@@ -184,9 +190,9 @@ function renderReport(report) {
   dropZone.hidden = true;
 
   const onAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-  saveButton.textContent = onAppleMobile ? "Save or share clean video" : "Download clean video";
+  saveButton.textContent = "Download clean video";
   saveHint.textContent = onAppleMobile
-    ? "Uses the iPhone share sheet. Choose Save to Files or another destination."
+    ? "Downloads the MP4/MOV bytes directly to Files; sharing through other apps may change HDR."
     : `Downloads as ${report.file.outputName.split(".").pop().toUpperCase()}.`;
 }
 
@@ -200,7 +206,7 @@ async function handleFile(file) {
   try {
     output = await inspectAndClean(file);
     renderReport(output.report);
-    showMessage(output.changed ? "Clean copy is ready." : "No removable user metadata was found; the original media was left unchanged.");
+    showMessage(output.changed ? "Clean copy is ready." : "No identifiable CapCut metadata was found; the original media was left unchanged.");
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "The video could not be cleaned.", true);
   } finally {
@@ -221,19 +227,10 @@ function downloadOutput() {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-async function saveOutput() {
+function saveOutput() {
   if (!output) return;
-  const sharedFile = new File([output.blob], output.name, { type: output.blob.type || "video/quicktime" });
-
-  try {
-    if (navigator.canShare?.({ files: [sharedFile] })) {
-      await navigator.share({ files: [sharedFile], title: output.name });
-      return;
-    }
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") return;
-  }
-
+  // Do not round-trip the output through another app's native share pipeline:
+  // destinations such as photo editors may create a new SDR/transcoded asset.
   downloadOutput();
 }
 

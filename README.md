@@ -37,17 +37,26 @@ Opening `index.html` directly may work in some browsers, but a local server is r
 ## Browser notes
 
 - Desktop browsers support drag and drop.
-- iPhone and iPad use the file picker. The Save button uses the system share sheet when file sharing is available, otherwise it downloads the file.
+- iPhone and iPad use the file picker. The Save button downloads the exact generated MP4/MOV bytes instead of invoking the share sheet, where a receiving app might transform the asset.
 - Very large videos still require enough browser memory to read the movie metadata atom, but the app does not load or copy the full media payload into JavaScript memory.
 
-## Verification performed on the supplied sample
+## Verification
 
-The test output remained `.mov`. Extracted HEVC video and AAC audio hashes matched the original exactly. The original 10-bit BT.2020 HLG and Dolby Vision configuration remained present, while these four entries were removed:
+Run: node --test tests/hdr-safe.test.mjs
 
-- `com.apple.quicktime.artwork` containing CapCut/Vicut export JSON
-- `Hw`
-- `te_is_reencode`
-- `DreaminaMetaInfo`
+The suite checks selective metadata removal and preservation of the original
+encoded mdat payload and codec/sample-description bytes across PQ, HLG,
+Dolby Vision, SDR, and files with unknown HDR signaling.
+
+For a real 10-bit HEVC HLG test video, FFprobe reported the same BT.2020 primaries,
+BT.2020 non-constant-luminance matrix, and HLG (arib-std-b67) transfer
+function before and after cleaning. Both files had the same byte length and
+the same SHA-256 of their entire mdat payload.
+
+The browser cannot control changes made by the operating system while importing
+a video from Photos or by an app receiving a file through the share sheet.
+For byte-exact checks, select the source video from Files and compare the
+downloaded file, not a copy re-exported by another app.
 
 ## Limitations
 
